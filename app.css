@@ -1,0 +1,11 @@
+Screen { padding: 0 1; }
+
+Summary {
+  color: $warning;
+  height: 3;
+  content-align: left middle;
+}
+Summary.passed { color: $success; }
+Summary.failed { color: $error; }
+
+DataTable { height: 1fr; }

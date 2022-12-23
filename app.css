@@ -6,6 +6,6 @@ Summary {
   content-align: left middle;
 }
 Summary.passed { color: $success; }
-Summary.failed { color: $error; }
+Summary.failed { color: $error-lighten-2; }
 
 DataTable { height: 1fr; }

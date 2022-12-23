@@ -46,7 +46,7 @@ class Runner(App):
     #####################################################
     # Custom state
 
-    tests = {}
+    tests = reactive({})
     hide_passed = reactive(False)
     done   = reactive(0)
     total  = reactive(0)
@@ -74,7 +74,6 @@ class Runner(App):
         self.tests = self.find_tests()
 
         self.table.add_columns("Test",STATUS)
-        self.table.add_rows(sorted([[k,v] for k,v in self.tests.items()]))
         self.total = len(self.tests)
 
         await self.run_tests()
@@ -96,12 +95,10 @@ class Runner(App):
     # Watches
 
     def watch_hide_passed(self, old: bool, new: bool) -> None:
-        self.table.clear()
-        if new:
-            self.table.add_rows(sorted([[k,v] for k,v in self.tests.items()
-                                        if v != PASSED]))
-        else:
-            self.table.add_rows(sorted([[k,v] for k,v in self.tests.items()]))
+        self.redraw_table()
+
+    def watch_tests(self, old, new) -> None:
+        self.redraw_table()
 
     def watch_total(self, old: int, new: int) -> None:
         self.summary.set_progress(self.done, self.total, self.passed)
@@ -115,27 +112,28 @@ class Runner(App):
     #####################################################
     # Custom
 
+    def redraw_table(self) -> None:
+        self.table.clear()
+        if self.hide_passed:
+            items = [[k,v] for k,v in self.tests.items() if v != PASSED]
+        else:
+            items = [[k,v] for k,v in self.tests.items()]
+        self.table.add_rows(sorted(items))
+        self.table._clear_caches()
+
     def set_test_status(self, test_name: str, new_status: str) -> None:
         if new_status != NOT_STARTED and self.tests[test_name] == NOT_STARTED:
             self.done += 1
             if new_status == PASSED:
                 self.passed += 1
-
         self.tests[test_name] = new_status
-
-        self.summary.set_progress(self.done, self.total, self.passed)
-
-        table = self.table.data
-        idx = [t for (t,_) in self.table.data.values()].index(test_name)
-        self.table.data[idx][1] = new_status
-        self.table.refresh_cell(idx,1)
-
-        # TODO: Expensive. Shouldn't be needed but currently is,
-        # at least as of textual 0.8.0
-        self.table._clear_caches()
+        self.redraw_table()
 
     def find_tests(self) -> Dict[str, str]:
-        return {os.path.basename(d[0]):NOT_STARTED for d in os.walk(TESTS_DIR) if d[0] != TESTS_DIR} 
+        return {os.path.basename(d[0]):NOT_STARTED 
+                for d in os.walk(TESTS_DIR) 
+                if d[0] != TESTS_DIR
+                }
 
     async def run_tests(self):
         coroutines = [self.run_test(test_name)

@@ -1,3 +1,4 @@
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.reactive import reactive
 from textual.widgets import DataTable, Footer, Static
@@ -112,12 +113,21 @@ class Runner(App):
     #####################################################
     # Custom
 
+
+    def status_text(self, status: str):
+        style = None
+        if status == PASSED:
+            style = "green"
+        elif status == FAILED:
+            style = "red"
+        return Text(status, style=style)
+
     def redraw_table(self) -> None:
         self.table.clear()
         if self.hide_passed:
-            items = [[k,v] for k,v in self.tests.items() if v != PASSED]
+            items = [[k,self.status_text(v)] for k,v in self.tests.items() if v != PASSED]
         else:
-            items = [[k,v] for k,v in self.tests.items()]
+            items = [[k,self.status_text(v)] for k,v in self.tests.items()]
         self.table.add_rows(sorted(items))
         self.table._clear_caches()
 
@@ -139,7 +149,7 @@ class Runner(App):
         coroutines = [self.run_test(test_name)
                       for test_name,status in self.tests.items()
                       if status == NOT_STARTED]
-        await asyncio.gather(*coroutines)
+        return asyncio.gather(*coroutines)
 
     async def run_test(self, test_name: str):
         process = await asyncio.create_subprocess_exec(

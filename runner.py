@@ -5,6 +5,12 @@ from typing import List, Dict
 import os
 import sys
 
+NOT_STARTED = "Not started"
+PASSED = "Passed"
+FAILED = "Failed"
+
+STATUS = "Status"
+
 class Summary(Static):
     def set_progress(self, done: int, total: int, passed: int) -> None:
         self.update(self.format(done, total, passed))
@@ -28,10 +34,12 @@ class Runner(App):
 
     CSS_PATH = "app.css"
 
+    #####################################################
+    # Custom state
+
     tests_dir = "end-to-end-tests"
     tests     = reactive({})
-    tests_idx = reactive({})
-    filter_passed = reactive(False)
+    hide_passed = reactive(False)
     done   = reactive(0)
     total  = reactive(0)
     passed = reactive(0)
@@ -43,36 +51,64 @@ class Runner(App):
     def compose(self) -> ComposeResult:
         self.summary = Summary()
         yield self.summary
-        yield DataTable()
+
+        self.table = DataTable()
+        yield self.table
+
         yield Footer()
+
+    #####################################################
+    # Lifecycle
 
     def on_mount(self) -> None:
         self.summary.set_progress(0,0,0)
 
         self.tests = self.find_tests()
-        self.tests_idx = {name:i for i,name in enumerate(sorted(self.tests.keys()))}
         self.run_tests()
 
-        self.table = self.query_one(DataTable)
-        self.table.add_columns("Test","Status")
+        self.table.add_columns("Test",STATUS)
         self.table.add_rows(sorted([[k,v] for k,v in self.tests.items()]))
 
+    #####################################################
+    # Actions
+
+    def action_filter_passed(self) -> None:
+        self.hide_passed = not self.hide_passed
+        if self.hide_passed:
+            self.table.columns[1].label = f"{STATUS} -P"
+        else:
+            self.table.columns[1].label = STATUS
+
+    #####################################################
+    # Watches
+
+    def watch_hide_passed(self, old: bool, new: bool) -> None:
+        self.table.clear()
+        if new:
+            self.table.add_rows(sorted([[k,v] for k,v in self.tests.items()
+                                        if v != PASSED]))
+        else:
+            self.table.add_rows(sorted([[k,v] for k,v in self.tests.items()]))
+
+    #####################################################
+    # Custom
+
     def set_test_status(self, test_name: str, new_status: str) -> None:
-        idx = self.tests_idx[test_name]
+        self.tests[test_name] = new_status
+
+        (idx,_) = next(filter(lambda i,row: row[0] == test_name, enumerate(self.table.data)))
         self.table.data[idx][1] = new_status
         self.table.refresh_cell(idx,1)
 
         # TODO: Expensive. Shouldn't be needed but currently is,
-        # at least as of textual==0.8.0
+        # at least as of textual 0.8.0
         self.table._clear_caches()
 
-    def action_filter_passed(self) -> None:
-        self.filter_passed = not self.filter_passed
-
     def find_tests(self) -> Dict[str, str]:
-        return {os.path.basename(d[0]):"Not started" for d in os.walk(self.tests_dir)}
+        return {os.path.basename(d[0]):NOT_STARTED for d in os.walk(self.tests_dir)}
 
     def run_tests(self) -> None:
+        # TODO
         pass
 
 

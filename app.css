@@ -9,3 +9,27 @@ Summary.passed { color: $success; }
 Summary.failed { color: $error-lighten-2; }
 
 DataTable { height: 1fr; }
+
+.diff {
+  border-top: $background-lighten-3 hkey;
+}
+.diff-test-name {
+  text-style: bold underline;
+  padding: 0 1;
+}
+.diff-columns { 
+  height: 10;
+  margin: 1 0 0 0;
+}
+.diff-column {
+  width: 1fr; 
+  padding: 0 1;
+}
+.diff-column-title {
+  margin: 0 0 1 0;
+}
+.diff-content {
+  background: $panel;
+  color: $text;
+  padding: 0 1;
+}

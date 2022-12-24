@@ -2,8 +2,10 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.reactive import reactive
 from textual.widgets import DataTable, Footer, Static
+from textual.containers import Horizontal, Vertical
 from typing import List, Dict
 import asyncio
+import difflib
 import os
 import subprocess
 import sys
@@ -15,8 +17,8 @@ FAILED = "Failed"
 STATUS = "Status"
 
 TESTS_DIR = "end-to-end-tests"
-#INTERPRETER = "_build/default/src/compiler.exe"
-INTERPRETER = "./compiler_standin.sh"
+INTERPRETER = "_build/default/src/compiler.exe"
+#INTERPRETER = "./compiler_standin.sh"
 
 class Summary(Static):
     def set_progress(self, done: int, total: int, passed: int) -> None:
@@ -34,6 +36,12 @@ class Summary(Static):
         passed_pct = 0 if total == 0 else passed*100.0/total
         return f"{done}/{total} tests done ({done_pct:.2f}%), {passed} passed ({passed_pct:.2f}%)"
 
+class Table(DataTable):
+    def watch_cursor_cell(self, old, new):
+        for watcher in self.cursor_cell_watchers:
+            watcher(old,new)
+        return super().watch_cursor_cell(old,new)
+
 class Runner(App):
 
     BINDINGS = [
@@ -47,7 +55,9 @@ class Runner(App):
     #####################################################
     # Custom state
 
-    tests = reactive({})
+    tests        = reactive({})
+    tests_stdout = reactive({})
+    tests_stderr = reactive({})
     hide_passed = reactive(False)
     done   = reactive(0)
     total  = reactive(0)
@@ -61,8 +71,28 @@ class Runner(App):
         self.summary = Summary()
         yield self.summary
 
-        self.table = DataTable()
+        self.table = Table()
+        self.table.cursor_cell_watchers = [self.watch_table_cursor_cell]
         yield self.table
+
+        self.diff = Vertical(
+                Static("", classes="diff-test-name"),
+                Horizontal(
+                    Vertical(
+                        Static("stdout", classes="diff-column-title"),
+                        Static("", classes="diff-content"),
+                        classes="diff-column",
+                        ),
+                    Vertical(
+                        Static("stderr", classes="diff-column-title"),
+                        Static("", classes="diff-content"),
+                        classes="diff-column",
+                        ),
+                    classes="diff-columns",
+                ),
+                classes="diff"
+        )
+        yield self.diff
 
         yield Footer()
 
@@ -100,6 +130,12 @@ class Runner(App):
 
     def watch_tests(self, old, new) -> None:
         self.redraw_table()
+
+    def watch_table_cursor_cell(self, old, new) -> None:
+        test_name = self.table.data[new.row][0]
+        self.diff.children[0].update(test_name)
+        self.diff.children[1].children[0].children[1].update(self.tests_stdout.get(test_name, ""))
+        self.diff.children[1].children[1].children[1].update(self.tests_stderr.get(test_name, ""))
 
     def watch_total(self, old: int, new: int) -> None:
         self.summary.set_progress(self.done, self.total, self.passed)
@@ -168,17 +204,51 @@ class Runner(App):
                 wanted_stdout = f.read()
                 if wanted_stdout != stdout:
                     self.set_test_status(test_name, FAILED)
-                    return
+                    self.tests_stdout[test_name] = diff(wanted_stdout, stdout)
+                else:
+                    self.tests_stdout[test_name] = Text(wanted_stdout)
+        else:
+            if stdout == "":
+                self.tests_stdout[test_name] = Text("[No stdout expected, none given]")
+
+            else:
+                self.set_test_status(test_name, FAILED)
+                self.tests_stdout[test_name] = Text(stdout, style="red") # TODO correct polarity? should it be green?
 
         if os.path.exists(wanted_stderr_path):
             with open(wanted_stderr_path, 'r') as f:
                 wanted_stderr = f.read()
                 if wanted_stderr != stderr:
                     self.set_test_status(test_name, FAILED)
-                    return
+                    self.tests_stderr[test_name] = diff(wanted_stderr, stderr)
+                else:
+                    self.tests_stderr[test_name] = Text(wanted_stderr)
+        else:
+            if stderr == "":
+                self.tests_stderr[test_name] = Text("[No stderr expected, none given]")
 
-        self.set_test_status(test_name, PASSED)
+            else:
+                self.set_test_status(test_name, FAILED)
+                self.tests_stderr[test_name] = Text(stderr, style="red") # TODO correct polarity? should it be green?
+
+        if self.tests[test_name] == NOT_STARTED: # if not failed
+            self.set_test_status(test_name, PASSED)
+
+def diff(old: str, new: str) -> Text:
+    result = Text()
+    codes = difflib.SequenceMatcher(a=old, b=new).get_opcodes()
+    for code in codes:
+        if code[0] == "equal": 
+            result.append(old[code[1]:code[2]])
+        elif code[0] == "delete":
+            result.append(Text(old[code[1]:code[2]],style="red"))
+        elif code[0] == "insert":
+            result.append(Text(new[code[3]:code[4]],style="green"))
+        elif code[0] == "replace":
+            result.append(Text(old[code[1]:code[2]],style="red")).append(Text(new[code[3]:code[4]],style="green"))
+    return result
 
 if __name__ == "__main__":
     app = Runner()
     asyncio.run(app.run_async())
+

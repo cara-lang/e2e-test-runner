@@ -114,12 +114,8 @@ class Runner(App):
 
     async def on_mount(self) -> None:
         self.summary.set_progress(0,0,0)
-
         self.tests = self.find_tests()
-
         self.table.add_columns("Test",STATUS)
-        self.total = len(self.tests)
-
         await self.run_tests()
 
     #####################################################
@@ -132,8 +128,19 @@ class Runner(App):
         else:
             self.table.columns[1].label = STATUS
 
-    def action_rerun(self) -> None:
-        assert False, "TODO implement action_rerun"
+    async def action_rerun(self) -> None:
+        self.tests_stdout_actual   = {}
+        self.tests_stdout_expected = {}
+        self.tests_stderr_actual   = {}
+        self.tests_stderr_expected = {}
+
+        self.done = 0
+        self.passed = 0
+        self.total = 0
+
+        self.tests = self.find_tests()
+
+        await self.run_tests()
 
     #####################################################
     # Watches
@@ -142,6 +149,7 @@ class Runner(App):
         self.redraw_table()
 
     def watch_tests(self, old, new) -> None:
+        self.total = len(self.tests)
         self.redraw_table()
 
     def watch_table_cursor_cell(self, old, new) -> None:

@@ -1,7 +1,5 @@
 # e2e-test-runner
 
-A runner for Cara E2E tests (see the `end-to-end-tests` directory in the `cara-lang/compiler` repo).
+<a href="https://raw.githubusercontent.com/cara-lang/e2e-test-runner/main/assets/screenshot.png"><img alt="Screenshot" src="https://github.com/cara-lang/e2e-test-runner/raw/main/assets/screenshot.png" width="400" /></a>
 
-```bash
-$ python ./runner.py
-```
+A runner for Cara E2E tests (see the `end-to-end-tests` directory in the `cara-lang/compiler` repo).

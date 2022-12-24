@@ -5,7 +5,6 @@ from textual.widgets import DataTable, Footer, Static
 from textual.containers import Horizontal, Vertical
 from typing import List, Dict
 import asyncio
-import difflib
 import os
 import subprocess
 import sys
@@ -56,8 +55,10 @@ class Runner(App):
     # Custom state
 
     tests        = reactive({})
-    tests_stdout = reactive({})
-    tests_stderr = reactive({})
+    tests_stdout_actual   = reactive({})
+    tests_stdout_expected = reactive({})
+    tests_stderr_actual   = reactive({})
+    tests_stderr_expected = reactive({})
     hide_passed = reactive(False)
     done   = reactive(0)
     total  = reactive(0)
@@ -76,22 +77,34 @@ class Runner(App):
         yield self.table
 
         self.diff = Vertical(
-                Static("", classes="diff-test-name"),
+                Static("Click on a test to see its output", classes="diff-test-name"),
                 Horizontal(
                     Vertical(
                         Static("stdout", classes="diff-column-title"),
-                        Static("", classes="diff-content"),
+                        Vertical(
+                            Static("Actual:",   classes="diff-column-section"),
+                            Static("", classes="diff-content"),
+                            Static("Expected:", classes="diff-column-section"),
+                            Static("", classes="diff-content"),
+                            classes="diff-column-output",
+                            ),
                         classes="diff-column",
                         ),
                     Vertical(
                         Static("stderr", classes="diff-column-title"),
-                        Static("", classes="diff-content"),
+                        Vertical(
+                            Static("Actual:",   classes="diff-column-section"),
+                            Static("", classes="diff-content"),
+                            Static("Expected:", classes="diff-column-section"),
+                            Static("", classes="diff-content"),
+                            classes="diff-column-output",
+                            ),
                         classes="diff-column",
                         ),
                     classes="diff-columns",
-                ),
+                    ),
                 classes="diff"
-        )
+                )
         yield self.diff
 
         yield Footer()
@@ -133,9 +146,19 @@ class Runner(App):
 
     def watch_table_cursor_cell(self, old, new) -> None:
         test_name = self.table.data[new.row][0]
-        self.diff.children[0].update(test_name)
-        self.diff.children[1].children[0].children[1].update(self.tests_stdout.get(test_name, ""))
-        self.diff.children[1].children[1].children[1].update(self.tests_stderr.get(test_name, ""))
+
+        # TODO is there a way to do this with IDs? Maybe create our own class with reactives...
+        diff_test_name = self.diff.children[0]
+        diff_stdout_actual   = self.diff.children[1].children[0].children[1].children[1]
+        diff_stdout_expected = self.diff.children[1].children[0].children[1].children[3]
+        diff_stderr_actual   = self.diff.children[1].children[1].children[1].children[1]
+        diff_stderr_expected = self.diff.children[1].children[1].children[1].children[3]
+
+        diff_test_name.update(test_name)
+        diff_stdout_actual.update(  self.tests_stdout_actual.get(  test_name, ""))
+        diff_stdout_expected.update(self.tests_stdout_expected.get(test_name, ""))
+        diff_stderr_actual.update(  self.tests_stderr_actual.get(  test_name, ""))
+        diff_stderr_expected.update(self.tests_stderr_expected.get(test_name, ""))
 
     def watch_total(self, old: int, new: int) -> None:
         self.summary.set_progress(self.done, self.total, self.passed)
@@ -153,7 +176,7 @@ class Runner(App):
     def status_text(self, status: str):
         style = None
         if status == PASSED:
-            style = "green"
+            style = "green reverse"
         elif status == FAILED:
             style = "red"
         return Text(status, style=style)
@@ -195,58 +218,37 @@ class Runner(App):
                 stderr=asyncio.subprocess.PIPE,
                 )
         stdout,stderr = await process.communicate()
+        stdout = stdout.decode("utf-8")
+        stderr = stderr.decode("utf-8")
 
         wanted_stdout_path = f"{TESTS_DIR}/{test_name}/stdout.txt"
         wanted_stderr_path = f"{TESTS_DIR}/{test_name}/stderr.txt"
 
+        self.tests_stdout_actual[test_name] = stdout
+        self.tests_stderr_actual[test_name] = stderr
+
         if os.path.exists(wanted_stdout_path):
             with open(wanted_stdout_path, 'r') as f:
                 wanted_stdout = f.read()
+                self.tests_stdout_expected[test_name] = wanted_stdout
                 if wanted_stdout != stdout:
                     self.set_test_status(test_name, FAILED)
-                    self.tests_stdout[test_name] = diff(wanted_stdout, stdout)
-                else:
-                    self.tests_stdout[test_name] = Text(wanted_stdout)
         else:
-            if stdout == "":
-                self.tests_stdout[test_name] = Text("[No stdout expected, none given]")
-
-            else:
+            if stdout != "":
                 self.set_test_status(test_name, FAILED)
-                self.tests_stdout[test_name] = Text(stdout, style="red") # TODO correct polarity? should it be green?
 
         if os.path.exists(wanted_stderr_path):
             with open(wanted_stderr_path, 'r') as f:
                 wanted_stderr = f.read()
+                self.tests_stderr_expected[test_name] = wanted_stderr
                 if wanted_stderr != stderr:
                     self.set_test_status(test_name, FAILED)
-                    self.tests_stderr[test_name] = diff(wanted_stderr, stderr)
-                else:
-                    self.tests_stderr[test_name] = Text(wanted_stderr)
         else:
-            if stderr == "":
-                self.tests_stderr[test_name] = Text("[No stderr expected, none given]")
-
-            else:
+            if stderr != "":
                 self.set_test_status(test_name, FAILED)
-                self.tests_stderr[test_name] = Text(stderr, style="red") # TODO correct polarity? should it be green?
 
         if self.tests[test_name] == NOT_STARTED: # if not failed
             self.set_test_status(test_name, PASSED)
-
-def diff(old: str, new: str) -> Text:
-    result = Text()
-    codes = difflib.SequenceMatcher(a=old, b=new).get_opcodes()
-    for code in codes:
-        if code[0] == "equal": 
-            result.append(old[code[1]:code[2]])
-        elif code[0] == "delete":
-            result.append(Text(old[code[1]:code[2]],style="red"))
-        elif code[0] == "insert":
-            result.append(Text(new[code[3]:code[4]],style="green"))
-        elif code[0] == "replace":
-            result.append(Text(old[code[1]:code[2]],style="red")).append(Text(new[code[3]:code[4]],style="green"))
-    return result
 
 if __name__ == "__main__":
     app = Runner()

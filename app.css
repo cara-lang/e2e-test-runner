@@ -15,21 +15,24 @@ DataTable { height: 1fr; }
 }
 .diff-test-name {
   text-style: bold underline;
-  padding: 0 1;
+  padding: 0 1 1 1;
 }
 .diff-columns { 
-  height: 10;
-  margin: 1 0 0 0;
+  min-height: 10;
+}
+.diff-column-title {
+  padding: 0 0 1 0;
 }
 .diff-column {
   width: 1fr; 
   padding: 0 1;
 }
-.diff-column-title {
-  margin: 0 0 1 0;
+.diff-column-section {
+  padding: 0 1 1 0;
 }
 .diff-content {
-  background: $panel;
+  background: $boost;
   color: $text;
   padding: 0 1;
+  margin: 0 0 1 0;
 }

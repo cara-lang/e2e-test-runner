@@ -17,7 +17,6 @@ STATUS = "Status"
 
 TESTS_DIR = "end-to-end-tests"
 INTERPRETER = "_build/default/src/compiler.exe"
-#INTERPRETER = "./compiler_standin.sh"
 
 class Summary(Static):
     def set_progress(self, done: int, total: int, passed: int) -> None:

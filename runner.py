@@ -4,7 +4,6 @@ from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
 from textual.widgets import DataTable, Footer, Static
 from typing import List, Dict
-import asyncio
 import os
 import re
 import subprocess
@@ -114,11 +113,11 @@ class Runner(App):
     #####################################################
     # Lifecycle
 
-    async def on_mount(self) -> None:
+    def on_mount(self) -> None:
         self.summary.set_progress(0,0,0,0,0)
         self.tests = self.find_tests()
         self.table.add_columns("Test",STATUS)
-        await self.run_tests()
+        self.run_tests()
 
     #####################################################
     # Actions
@@ -130,7 +129,7 @@ class Runner(App):
         else:
             self.table.columns[1].label = STATUS
 
-    async def action_rerun(self) -> None:
+    def action_rerun(self) -> None:
         self.tests_stdout_actual   = {}
         self.tests_stdout_expected = {}
         self.tests_stderr_actual   = {}
@@ -144,7 +143,7 @@ class Runner(App):
 
         self.tests = self.find_tests()
 
-        await self.run_tests()
+        self.run_tests()
         self.redraw_table()
 
     #####################################################
@@ -231,22 +230,20 @@ class Runner(App):
                 if d[0] != TESTS_DIR
                 }
 
-    async def run_tests(self):
-        coroutines = [self.run_test(test_name)
-                      for test_name,status in self.tests.items()
-                      if status == NOT_STARTED]
-        return asyncio.gather(*coroutines)
+    def run_tests(self):
+        for test_name,status in self.tests.items():
+            if status == NOT_STARTED:
+                self.run_test(test_name)
 
-    async def run_test(self, test_name: str):
-        process = await asyncio.create_subprocess_exec(
-                INTERPRETER,
-                f"{TESTS_DIR}/{test_name}/main.cara",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+    def run_test(self, test_name: str):
+        process = subprocess.run(
+                [ INTERPRETER, f"{TESTS_DIR}/{test_name}/main.cara" ],
+                capture_output=True,
                 text=False,
                 universal_newlines=False,
                 )
-        stdout,stderr = await process.communicate()
+        stdout = process.stdout
+        stderr = process.stderr
         stdout_s = stdout.decode("utf-8")
         stderr_s = stderr.decode("utf-8")
 
@@ -286,5 +283,5 @@ class Runner(App):
 
 if __name__ == "__main__":
     app = Runner()
-    asyncio.run(app.run_async())
+    app.run()
 

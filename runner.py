@@ -257,10 +257,10 @@ class Runner(App):
             with open(wanted_stderr_path, 'r') as f:
                 wanted_stderr = f.read()
                 self.tests_stderr_expected[test_name] = wanted_stderr
-                if wanted_stderr != stderr:
+                if self.tests[test_name] == NOT_STARTED and wanted_stderr != stderr:
                     self.set_test_status(test_name, DIFF_ERR)
         else:
-            if stderr != "":
+            if self.tests[test_name] == NOT_STARTED and stderr != "":
                 self.set_test_status(test_name, FAILED)
 
         if self.tests[test_name] == NOT_STARTED: # if not failed

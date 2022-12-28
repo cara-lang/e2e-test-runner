@@ -12,6 +12,7 @@ import sys
 NOT_STARTED = "Not started"
 PASSED = "Passed"
 FAILED = "Failed"
+DIFF_ERR = "Different error"
 
 STATUS = "Status"
 
@@ -19,20 +20,18 @@ TESTS_DIR = "end-to-end-tests"
 INTERPRETER = "_build/default/src/compiler.exe"
 
 class Summary(Static):
-    def set_progress(self, done: int, total: int, passed: int) -> None:
-        self.update(self.format(done, total, passed))
+    def set_progress(self, done: int, total: int, passed: int, diff_err: int) -> None:
+        self.update(self.format(done, total, passed, diff_err))
         if done == total:
             if passed == total:
                 self.set_class(True,  "passed")
                 self.set_class(False, "failed")
             else:
-                self.set_class(False,  "passed")
-                self.set_class(True, "failed")
+                self.set_class(False, "passed")
+                self.set_class(True,  "failed")
                 
-    def format(self, done: int, total: int, passed: int) -> str:
-        done_pct   = 0 if total == 0 else done*100.0/total
-        passed_pct = 0 if total == 0 else passed*100.0/total
-        return f"{done}/{total} tests done ({done_pct:.2f}%), {passed} passed ({passed_pct:.2f}%)"
+    def format(self, done: int, total: int, passed: int, diff_err: int) -> str:
+        return f"{done}/{total} tests done, {passed} passed, {diff_err} differ in error"
 
 class Table(DataTable):
     def watch_cursor_cell(self, old, new):
@@ -59,9 +58,10 @@ class Runner(App):
     tests_stderr_actual   = reactive({})
     tests_stderr_expected = reactive({})
     hide_passed = reactive(False)
-    done   = reactive(0)
-    total  = reactive(0)
-    passed = reactive(0)
+    done     = reactive(0)
+    total    = reactive(0)
+    passed   = reactive(0)
+    diff_err = reactive(0)
 
     def get_key_display(self, key: str) -> str:
         if key == "space": return "Space"
@@ -112,7 +112,7 @@ class Runner(App):
     # Lifecycle
 
     async def on_mount(self) -> None:
-        self.summary.set_progress(0,0,0)
+        self.summary.set_progress(0,0,0,0)
         self.tests = self.find_tests()
         self.table.add_columns("Test",STATUS)
         await self.run_tests()
@@ -135,11 +135,13 @@ class Runner(App):
 
         self.done = 0
         self.passed = 0
+        self.diff_err = 0
         self.total = 0
 
         self.tests = self.find_tests()
 
         await self.run_tests()
+        self.redraw_table()
 
     #####################################################
     # Watches
@@ -168,13 +170,16 @@ class Runner(App):
         diff_stderr_expected.update(self.tests_stderr_expected.get(test_name, ""))
 
     def watch_total(self, old: int, new: int) -> None:
-        self.summary.set_progress(self.done, self.total, self.passed)
+        self.summary.set_progress(self.done, self.total, self.passed, self.diff_err)
 
     def watch_done(self, old: int, new: int) -> None:
-        self.summary.set_progress(self.done, self.total, self.passed)
+        self.summary.set_progress(self.done, self.total, self.passed, self.diff_err)
 
     def watch_passed(self, old: int, new: int) -> None:
-        self.summary.set_progress(self.done, self.total, self.passed)
+        self.summary.set_progress(self.done, self.total, self.passed, self.diff_err)
+
+    def watch_diff_err(self, old: int, new: int) -> None:
+        self.summary.set_progress(self.done, self.total, self.passed, self.diff_err)
 
     #####################################################
     # Custom
@@ -184,6 +189,8 @@ class Runner(App):
         style = None
         if status == PASSED:
             style = "green reverse"
+        elif status == DIFF_ERR:
+            style = "yellow reverse"
         elif status == FAILED:
             style = "red"
         return Text(status, style=style)
@@ -191,7 +198,7 @@ class Runner(App):
     def redraw_table(self) -> None:
         self.table.clear()
         if self.hide_passed:
-            items = [[k,self.status_text(v)] for k,v in self.tests.items() if v != PASSED]
+            items = [[k,self.status_text(v)] for k,v in self.tests.items() if v != PASSED and v != DIFF_ERR]
         else:
             items = [[k,self.status_text(v)] for k,v in self.tests.items()]
         self.table.add_rows(sorted(items))
@@ -202,6 +209,8 @@ class Runner(App):
             self.done += 1
             if new_status == PASSED:
                 self.passed += 1
+            elif new_status == DIFF_ERR:
+                self.diff_err += 1
         self.tests[test_name] = new_status
         self.redraw_table()
 
@@ -249,7 +258,7 @@ class Runner(App):
                 wanted_stderr = f.read()
                 self.tests_stderr_expected[test_name] = wanted_stderr
                 if wanted_stderr != stderr:
-                    self.set_test_status(test_name, FAILED)
+                    self.set_test_status(test_name, DIFF_ERR)
         else:
             if stderr != "":
                 self.set_test_status(test_name, FAILED)

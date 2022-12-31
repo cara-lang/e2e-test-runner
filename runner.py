@@ -1,11 +1,12 @@
 from rich.text import Text
 from textual.app import App, ComposeResult
+from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
 from textual.widgets import DataTable, Footer, Static
-from textual.containers import Horizontal, Vertical
 from typing import List, Dict
 import asyncio
 import os
+import re
 import subprocess
 import sys
 
@@ -13,6 +14,7 @@ NOT_STARTED = "Not started"
 PASSED = "Passed"
 FAILED = "Failed"
 DIFF_ERR = "Different error"
+ALMOST = "Almost (error formatting)"
 
 STATUS = "Status"
 
@@ -20,8 +22,8 @@ TESTS_DIR = "end-to-end-tests"
 INTERPRETER = "_build/default/src/compiler.exe"
 
 class Summary(Static):
-    def set_progress(self, done: int, total: int, passed: int, diff_err: int) -> None:
-        self.update(self.format(done, total, passed, diff_err))
+    def set_progress(self, done: int, total: int, passed: int, diff_err: int, almost: int) -> None:
+        self.update(self.format(done, total, passed, diff_err, almost))
         if done == total:
             if passed == total:
                 self.set_class(True,  "passed")
@@ -30,8 +32,8 @@ class Summary(Static):
                 self.set_class(False, "passed")
                 self.set_class(True,  "failed")
                 
-    def format(self, done: int, total: int, passed: int, diff_err: int) -> str:
-        return f"{done}/{total} tests done, {passed} passed, {diff_err} differ in error"
+    def format(self, done: int, total: int, passed: int, diff_err: int, almost: int) -> str:
+        return f"{done}/{total} tests done, {passed} passed, {almost} almost, {diff_err} differ in error"
 
 class Table(DataTable):
     def watch_cursor_cell(self, old, new):
@@ -62,6 +64,7 @@ class Runner(App):
     total    = reactive(0)
     passed   = reactive(0)
     diff_err = reactive(0)
+    almost   = reactive(0)
 
     def get_key_display(self, key: str) -> str:
         if key == "space": return "Space"
@@ -112,7 +115,7 @@ class Runner(App):
     # Lifecycle
 
     async def on_mount(self) -> None:
-        self.summary.set_progress(0,0,0,0)
+        self.summary.set_progress(0,0,0,0,0)
         self.tests = self.find_tests()
         self.table.add_columns("Test",STATUS)
         await self.run_tests()
@@ -136,6 +139,7 @@ class Runner(App):
         self.done = 0
         self.passed = 0
         self.diff_err = 0
+        self.almost = 0
         self.total = 0
 
         self.tests = self.find_tests()
@@ -170,16 +174,19 @@ class Runner(App):
         diff_stderr_expected.update(self.tests_stderr_expected.get(test_name, ""))
 
     def watch_total(self, old: int, new: int) -> None:
-        self.summary.set_progress(self.done, self.total, self.passed, self.diff_err)
+        self.summary.set_progress(self.done, self.total, self.passed, self.diff_err, self.almost)
 
     def watch_done(self, old: int, new: int) -> None:
-        self.summary.set_progress(self.done, self.total, self.passed, self.diff_err)
+        self.summary.set_progress(self.done, self.total, self.passed, self.diff_err, self.almost)
 
     def watch_passed(self, old: int, new: int) -> None:
-        self.summary.set_progress(self.done, self.total, self.passed, self.diff_err)
+        self.summary.set_progress(self.done, self.total, self.passed, self.diff_err, self.almost)
 
     def watch_diff_err(self, old: int, new: int) -> None:
-        self.summary.set_progress(self.done, self.total, self.passed, self.diff_err)
+        self.summary.set_progress(self.done, self.total, self.passed, self.diff_err, self.almost)
+
+    def watch_almost(self, old: int, new: int) -> None:
+        self.summary.set_progress(self.done, self.total, self.passed, self.diff_err, self.almost)
 
     #####################################################
     # Custom
@@ -189,8 +196,10 @@ class Runner(App):
         style = None
         if status == PASSED:
             style = "green reverse"
-        elif status == DIFF_ERR:
+        elif status == ALMOST:
             style = "yellow reverse"
+        elif status == DIFF_ERR:
+            style = "yellow"
         elif status == FAILED:
             style = "red"
         return Text(status, style=style)
@@ -198,7 +207,7 @@ class Runner(App):
     def redraw_table(self) -> None:
         self.table.clear()
         if self.hide_passed:
-            items = [[k,self.status_text(v)] for k,v in self.tests.items() if v != PASSED and v != DIFF_ERR]
+            items = [[k,self.status_text(v)] for k,v in self.tests.items() if v != PASSED and v != ALMOST]
         else:
             items = [[k,self.status_text(v)] for k,v in self.tests.items()]
         self.table.add_rows(sorted(items))
@@ -209,6 +218,8 @@ class Runner(App):
             self.done += 1
             if new_status == PASSED:
                 self.passed += 1
+            elif new_status == ALMOST:
+                self.almost += 1
             elif new_status == DIFF_ERR:
                 self.diff_err += 1
         self.tests[test_name] = new_status
@@ -232,35 +243,42 @@ class Runner(App):
                 f"{TESTS_DIR}/{test_name}/main.cara",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                text=False,
+                universal_newlines=False,
                 )
         stdout,stderr = await process.communicate()
-        stdout = stdout.decode("utf-8")
-        stderr = stderr.decode("utf-8")
+        stdout_s = stdout.decode("utf-8")
+        stderr_s = stderr.decode("utf-8")
 
         wanted_stdout_path = f"{TESTS_DIR}/{test_name}/stdout.txt"
         wanted_stderr_path = f"{TESTS_DIR}/{test_name}/stderr.txt"
 
-        self.tests_stdout_actual[test_name] = stdout
-        self.tests_stderr_actual[test_name] = stderr
+        self.tests_stdout_actual[test_name] = stdout_s
+        self.tests_stderr_actual[test_name] = stderr_s
 
         if os.path.exists(wanted_stdout_path):
-            with open(wanted_stdout_path, 'r') as f:
+            with open(wanted_stdout_path, 'rb') as f:
                 wanted_stdout = f.read()
-                self.tests_stdout_expected[test_name] = wanted_stdout
+                self.tests_stdout_expected[test_name] = wanted_stdout.decode("utf-8")
                 if wanted_stdout != stdout:
                     self.set_test_status(test_name, FAILED)
         else:
-            if stdout != "":
+            if stdout != b"":
                 self.set_test_status(test_name, FAILED)
 
         if os.path.exists(wanted_stderr_path):
-            with open(wanted_stderr_path, 'r') as f:
+            with open(wanted_stderr_path, 'rb') as f:
                 wanted_stderr = f.read()
-                self.tests_stderr_expected[test_name] = wanted_stderr
+                wanted_stderr_s = wanted_stderr.decode("utf-8")
+                self.tests_stderr_expected[test_name] = wanted_stderr_s
                 if self.tests[test_name] == NOT_STARTED and wanted_stderr != stderr:
-                    self.set_test_status(test_name, DIFF_ERR)
+                    wanted_errcode = re.findall("(E\d{4}):", wanted_stderr_s)[0]
+                    if re.search(wanted_errcode, stderr_s):
+                        self.set_test_status(test_name, ALMOST)
+                    else:
+                        self.set_test_status(test_name, DIFF_ERR)
         else:
-            if self.tests[test_name] == NOT_STARTED and stderr != "":
+            if self.tests[test_name] == NOT_STARTED and stderr != b"":
                 self.set_test_status(test_name, FAILED)
 
         if self.tests[test_name] == NOT_STARTED: # if not failed
